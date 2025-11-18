@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException, Query
@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from database import db, create_document, get_documents
 from schemas import Member, RSVP, Event, Article, Mixtape, Partner, Coupon, Special
 
-app = FastAPI(title="I Love Hip Hop JA API", version="1.0")
+app = FastAPI(title="I Love Hip Hop JA API", version="1.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -104,6 +104,28 @@ def get_coupons(active_only: bool = True):
     return [Coupon(**{k: v for k, v in d.items() if k != "_id"}) for d in docs]
 
 
+@app.get("/api/coupons/verify")
+def verify_coupon(code: str):
+    now = datetime.now(timezone.utc)
+    docs = get_documents("coupon", {"code": code})
+    if not docs:
+        return {"valid": False, "reason": "Not found"}
+    c = docs[0]
+    starts = c.get("starts_at")
+    ends = c.get("ends_at")
+    active = (starts <= now <= ends) if starts and ends else False
+    remaining_seconds = int((ends - now).total_seconds()) if ends else 0
+    return {
+        "valid": active,
+        "code": c.get("code"),
+        "title": c.get("title"),
+        "member_only": c.get("member_only", False),
+        "starts_at": starts,
+        "ends_at": ends,
+        "remaining_seconds": max(0, remaining_seconds)
+    }
+
+
 # --- Conversion endpoints ---
 
 class MembershipSignup(BaseModel):
@@ -158,6 +180,101 @@ def create_rsvp(payload: RSVPRequest):
         return {"ok": True, "id": inserted_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Admin seed endpoint ---
+
+@app.post("/admin/seed")
+def seed_content():
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not available")
+
+    inserted = {"events": 0, "coupons": 0, "specials": 0}
+
+    # Seed events for Dulce Lounge Thursdays in November and NYD special
+    venue_name = "Dulce Lounge"
+    venue_address = "22 Barbican Road, Kingston, Jamaica"
+
+    events_seed = []
+
+    # Two explicit November Thursdays with themes and DJs provided
+    try:
+        # Use current year reference for demo purposes
+        year = datetime.now().year
+        nov_20 = datetime(year, 11, 20, 22, 0, 0, tzinfo=timezone.utc)
+        nov_27 = datetime(year, 11, 27, 22, 0, 0, tzinfo=timezone.utc)
+
+        events_seed.append(Event(
+            title="I Love Hip Hop JA – Open Sky: She Cold",
+            date=nov_20,
+            theme="She Cold",
+            description="Featuring 3D from Renaissance with ILHH residents Andre Millwood, Ovadose, DJ Miltion.",
+            flyer_url=None,
+            sponsors=["Dulce Lounge"],
+            djs=["3D (Renaissance)", "Andre Millwood", "Ovadose", "DJ Miltion"],
+            tags=["hiphop", "kingston", "thursday", "open-sky"],
+            is_featured=True,
+            venue_name=venue_name,
+            venue_address=venue_address,
+        ))
+
+        events_seed.append(Event(
+            title="I Love Hip Hop JA – Open Sky: High Tide",
+            date=nov_27,
+            theme="High Tide",
+            description="Troy Finzi from FAME FM with ILHH favorites Steamaz, Andre Millwood, Ovadose.",
+            flyer_url=None,
+            sponsors=["Dulce Lounge"],
+            djs=["Troy Finzi (FAME FM)", "Steamaz", "Andre Millwood", "Ovadose"],
+            tags=["hiphop", "kingston", "thursday", "open-sky"],
+            is_featured=False,
+            venue_name=venue_name,
+            venue_address=venue_address,
+        ))
+
+        # New Year's Day Special
+        nyd = datetime(year + 1, 1, 1, 20, 0, 0, tzinfo=timezone.utc)
+        events_seed.append(Event(
+            title="New Year's Day – Hip Hop Lovers Special",
+            date=nyd,
+            theme="Fresh Start",
+            description="Special package and experience for Hip Hop Lovers to kick off the year.",
+            sponsors=["Dulce Lounge"],
+            djs=["ILHH Residents"],
+            tags=["hiphop", "special", "newyears"],
+            is_featured=True,
+            venue_name=venue_name,
+            venue_address=venue_address,
+        ))
+    except Exception:
+        pass
+
+    # Insert events if not already present (by title+date)
+    for e in events_seed:
+        exists = db["event"].find_one({"title": e.title, "date": e.date})
+        if not exists:
+            create_document("event", e)
+            inserted["events"] += 1
+
+    # Seed a happy hour coupon active for tonight window (2.5 hours)
+    now = datetime.now(timezone.utc)
+    starts = now - timedelta(minutes=15)
+    ends = now + timedelta(hours=2, minutes=30)
+    coupon_code = "HAPPY241"
+    existing_coupon = db["coupon"].find_one({"code": coupon_code})
+    if not existing_coupon:
+        coupon = Coupon(code=coupon_code, title="Happy Hour 8:00–10:30 PM", member_only=False, starts_at=starts, ends_at=ends)
+        create_document("coupon", coupon)
+        inserted["coupons"] += 1
+
+    # Seed weekly special
+    week_of = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+    if not db["special"].find_one({"week_of": week_of}):
+        special = Special(title="2-4-1 Specials", details="Members get 2-for-1 drinks this week.", week_of=week_of)
+        create_document("special", special)
+        inserted["specials"] += 1
+
+    return {"ok": True, "inserted": inserted}
 
 
 # --- Schema discovery for admin tooling ---

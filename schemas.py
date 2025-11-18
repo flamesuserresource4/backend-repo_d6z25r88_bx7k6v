@@ -36,6 +36,7 @@ class RSVP(BaseModel):
 
 class Event(BaseModel):
     title: str
+    slug: Optional[str] = None
     date: datetime
     theme: Optional[str] = None
     description: Optional[str] = None
@@ -44,6 +45,8 @@ class Event(BaseModel):
     djs: List[str] = Field(default_factory=list)
     tags: List[str] = Field(default_factory=list)
     is_featured: bool = False
+    venue_name: Optional[str] = None
+    venue_address: Optional[str] = None
 
 class Article(BaseModel):
     title: str
