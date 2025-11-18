@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from database import db, create_document, get_documents
 from schemas import Member, RSVP, Event, Article, Mixtape, Partner, Coupon, Special
 
-app = FastAPI(title="I Love Hip Hop JA API", version="1.1")
+app = FastAPI(title="I Love Hip Hop JA API", version="1.2")
 
 app.add_middleware(
     CORSMiddleware,
@@ -86,6 +86,17 @@ def list_articles(tag: Optional[str] = None):
     flt = {"tags": {"$in": [tag]}} if tag else {}
     docs = get_documents("article", flt)
     return [Article(**{k: v for k, v in d.items() if k != "_id"}) for d in docs]
+
+
+@app.get("/api/articles/{slug}", response_model=Article)
+def get_article(slug: str):
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not available")
+    doc = db["article"].find_one({"slug": slug})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Article not found")
+    payload = {k: v for k, v in doc.items() if k != "_id"}
+    return Article(**payload)
 
 
 @app.get("/api/mixtapes", response_model=List[Mixtape])
@@ -319,6 +330,53 @@ def seed_content():
 def seed_ilhh_november():
     inserted = _seed_core_content(include_december=True)
     return {"ok": True, "inserted": inserted, "note": "Seeded November set, December placeholders, NYD, weekly special, and happy hour coupon."}
+
+
+# --- Articles CMS (Admin) ---
+
+class AdminArticlePayload(BaseModel):
+    title: str
+    slug: str
+    content: str
+    tags: Optional[List[str]] = None
+    author: Optional[str] = None
+    cover_image: Optional[str] = None
+
+
+@app.post("/admin/articles")
+def upsert_article(payload: AdminArticlePayload):
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not available")
+    if not payload.slug or " " in payload.slug:
+        raise HTTPException(status_code=400, detail="Slug must be URL-safe (no spaces)")
+
+    data = {
+        "title": payload.title,
+        "slug": payload.slug,
+        "content": payload.content,
+        "tags": payload.tags or [],
+        "author": payload.author,
+        "cover_image": payload.cover_image,
+    }
+    now = datetime.now(timezone.utc)
+    existing = db["article"].find_one({"slug": payload.slug})
+    if existing:
+        db["article"].update_one({"slug": payload.slug}, {"$set": {**data, "updated_at": now}})
+        action = "updated"
+    else:
+        db["article"].insert_one({**data, "created_at": now, "updated_at": now})
+        action = "created"
+    return {"ok": True, "action": action, "slug": payload.slug}
+
+
+@app.delete("/admin/articles/{slug}")
+def delete_article(slug: str):
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not available")
+    res = db["article"].delete_one({"slug": slug})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Article not found")
+    return {"ok": True, "deleted": slug}
 
 
 # --- Schema discovery for admin tooling ---
