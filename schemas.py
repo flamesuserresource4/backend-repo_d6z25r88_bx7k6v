@@ -1,48 +1,85 @@
 """
-Database Schemas
+Database Schemas for I LOVE HIP HOP JA
 
-Define your MongoDB collection schemas here using Pydantic models.
-These schemas are used for data validation in your application.
-
-Each Pydantic model represents a collection in your database.
-Model name is converted to lowercase for the collection name:
-- User -> "user" collection
-- Product -> "product" collection
-- BlogPost -> "blogs" collection
+Each Pydantic model represents a MongoDB collection. The collection name is the
+lowercase of the class name (e.g., Member -> "member").
 """
+from typing import List, Optional
+from pydantic import BaseModel, Field, HttpUrl
+from datetime import datetime
 
-from pydantic import BaseModel, Field
-from typing import Optional
+# Core domain schemas
 
-# Example schemas (replace with your own):
-
-class User(BaseModel):
-    """
-    Users collection schema
-    Collection name: "user" (lowercase of class name)
-    """
-    name: str = Field(..., description="Full name")
+class Member(BaseModel):
     email: str = Field(..., description="Email address")
-    address: str = Field(..., description="Address")
-    age: Optional[int] = Field(None, ge=0, le=120, description="Age in years")
-    is_active: bool = Field(True, description="Whether user is active")
+    phone: Optional[str] = Field(None, description="Phone number")
+    ig_handle: Optional[str] = Field(None, description="Instagram handle")
+    first_name: Optional[str] = Field(None, description="First name")
+    last_name: Optional[str] = Field(None, description="Last name")
+    tier: str = Field("standard", description="Membership tier")
+    saved_mixtapes: List[str] = Field(default_factory=list)
+    saved_photos: List[str] = Field(default_factory=list)
+    music_favorites_songs: List[str] = Field(default_factory=list)
+    music_favorites_albums: List[str] = Field(default_factory=list)
+    music_favorites_lyrics: List[str] = Field(default_factory=list)
+    favorite_djs: List[str] = Field(default_factory=list)
 
-class Product(BaseModel):
-    """
-    Products collection schema
-    Collection name: "product" (lowercase of class name)
-    """
-    title: str = Field(..., description="Product title")
-    description: Optional[str] = Field(None, description="Product description")
-    price: float = Field(..., ge=0, description="Price in dollars")
-    category: str = Field(..., description="Product category")
-    in_stock: bool = Field(True, description="Whether product is in stock")
+class RSVP(BaseModel):
+    name: str = Field(..., description="Full name of the person reserving")
+    email: str = Field(..., description="Email for confirmation")
+    phone: Optional[str] = Field(None)
+    package: str = Field(..., description="Package type: Special, VIP, Mogul")
+    group_size: int = Field(2, ge=1, le=20)
+    bottle_choice: Optional[str] = None
+    notes: Optional[str] = None
+    status: str = Field("pending", description="pending|confirmed|cancelled|completed")
 
-# Add your own schemas here:
-# --------------------------------------------------
+class Event(BaseModel):
+    title: str
+    date: datetime
+    theme: Optional[str] = None
+    description: Optional[str] = None
+    flyer_url: Optional[str] = None
+    sponsors: List[str] = Field(default_factory=list)
+    djs: List[str] = Field(default_factory=list)
+    tags: List[str] = Field(default_factory=list)
+    is_featured: bool = False
 
-# Note: The Flames database viewer will automatically:
-# 1. Read these schemas from GET /schema endpoint
-# 2. Use them for document validation when creating/editing
-# 3. Handle all database operations (CRUD) directly
-# 4. You don't need to create any database endpoints!
+class Article(BaseModel):
+    title: str
+    slug: str
+    content: str
+    tags: List[str] = Field(default_factory=list)
+    author: Optional[str] = None
+    cover_image: Optional[HttpUrl] = None
+
+class Mixtape(BaseModel):
+    title: str
+    dj: str
+    embed_url: Optional[HttpUrl] = None
+    cover_image: Optional[HttpUrl] = None
+    description: Optional[str] = None
+    external_url: Optional[HttpUrl] = None
+    plays: int = 0
+
+class Partner(BaseModel):
+    name: str
+    logo_url: Optional[HttpUrl] = None
+    instagram: Optional[str] = None
+    gallery_url: Optional[HttpUrl] = None
+    featured: bool = False
+
+class Coupon(BaseModel):
+    code: str
+    title: str = Field("Happy Hour 8:00–10:30 PM")
+    member_only: bool = False
+    starts_at: datetime
+    ends_at: datetime
+
+class Special(BaseModel):
+    title: str = Field("2-4-1 Specials")
+    details: str = Field("Members get 2-for-1 drinks this week")
+    week_of: datetime
+
+# Note: Additional collections (e.g., Profile) can be added later. The Member model
+# already carries the cultural identity preferences.
