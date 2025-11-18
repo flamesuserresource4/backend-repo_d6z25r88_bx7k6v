@@ -64,7 +64,21 @@ def list_events(tag: Optional[str] = None, featured: Optional[bool] = None):
         flt["is_featured"] = featured
     docs = get_documents("event", flt)
     # Convert Mongo documents to Pydantic
-    return [Event(**{k: v for k, v in d.items() if k != "_id"}) for d in docs]
+    events: List[Event] = []
+    for d in docs:
+        payload = {k: v for k, v in d.items() if k != "_id"}
+        # Ensure slug exists if missing
+        if not payload.get("slug"):
+            # naive slug from title and date
+            title = (payload.get("title") or "event").lower().replace(" ", "-")
+            try:
+                dt = payload.get("date")
+                suffix = f"-{dt.year}-{dt.month}-{dt.day}" if dt else ""
+            except Exception:
+                suffix = ""
+            payload["slug"] = f"{title}{suffix}"
+        events.append(Event(**payload))
+    return events
 
 
 @app.get("/api/articles", response_model=List[Article])
@@ -182,10 +196,9 @@ def create_rsvp(payload: RSVPRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# --- Admin seed endpoint ---
+# --- Admin seed endpoints ---
 
-@app.post("/admin/seed")
-def seed_content():
+def _seed_core_content(include_december: bool = False):
     if db is None:
         raise HTTPException(status_code=500, detail="Database not available")
 
@@ -197,15 +210,14 @@ def seed_content():
 
     events_seed = []
 
-    # Two explicit November Thursdays with themes and DJs provided
     try:
-        # Use current year reference for demo purposes
         year = datetime.now().year
         nov_20 = datetime(year, 11, 20, 22, 0, 0, tzinfo=timezone.utc)
         nov_27 = datetime(year, 11, 27, 22, 0, 0, tzinfo=timezone.utc)
 
         events_seed.append(Event(
             title="I Love Hip Hop JA – Open Sky: She Cold",
+            slug="open-sky-she-cold",
             date=nov_20,
             theme="She Cold",
             description="Featuring 3D from Renaissance with ILHH residents Andre Millwood, Ovadose, DJ Miltion.",
@@ -220,6 +232,7 @@ def seed_content():
 
         events_seed.append(Event(
             title="I Love Hip Hop JA – Open Sky: High Tide",
+            slug="open-sky-high-tide",
             date=nov_27,
             theme="High Tide",
             description="Troy Finzi from FAME FM with ILHH favorites Steamaz, Andre Millwood, Ovadose.",
@@ -232,10 +245,29 @@ def seed_content():
             venue_address=venue_address,
         ))
 
+        # December placeholders (Thursdays)
+        if include_december:
+            for day in [4, 11, 18, 25]:
+                dec_dt = datetime(year, 12, day, 22, 0, 0, tzinfo=timezone.utc)
+                events_seed.append(Event(
+                    title=f"I Love Hip Hop JA – Dulce Thursdays ({day} Dec)",
+                    slug=f"dulce-thursdays-{year}-12-{day}",
+                    date=dec_dt,
+                    theme="Dulce Thursdays",
+                    description="Monthly placeholder – lineup TBA.",
+                    sponsors=["Dulce Lounge"],
+                    djs=["ILHH Residents"],
+                    tags=["hiphop", "kingston", "thursday"],
+                    is_featured=False,
+                    venue_name=venue_name,
+                    venue_address=venue_address,
+                ))
+
         # New Year's Day Special
         nyd = datetime(year + 1, 1, 1, 20, 0, 0, tzinfo=timezone.utc)
         events_seed.append(Event(
             title="New Year's Day – Hip Hop Lovers Special",
+            slug="new-years-day-hip-hop-lovers-special",
             date=nyd,
             theme="Fresh Start",
             description="Special package and experience for Hip Hop Lovers to kick off the year.",
@@ -260,7 +292,7 @@ def seed_content():
     now = datetime.now(timezone.utc)
     starts = now - timedelta(minutes=15)
     ends = now + timedelta(hours=2, minutes=30)
-    coupon_code = "HAPPY241"
+    coupon_code = "ILHH-HH"
     existing_coupon = db["coupon"].find_one({"code": coupon_code})
     if not existing_coupon:
         coupon = Coupon(code=coupon_code, title="Happy Hour 8:00–10:30 PM", member_only=False, starts_at=starts, ends_at=ends)
@@ -274,7 +306,19 @@ def seed_content():
         create_document("special", special)
         inserted["specials"] += 1
 
+    return inserted
+
+
+@app.post("/admin/seed")
+def seed_content():
+    inserted = _seed_core_content(include_december=False)
     return {"ok": True, "inserted": inserted}
+
+
+@app.post("/admin/seed/ilhh-november")
+def seed_ilhh_november():
+    inserted = _seed_core_content(include_december=True)
+    return {"ok": True, "inserted": inserted, "note": "Seeded November set, December placeholders, NYD, weekly special, and happy hour coupon."}
 
 
 # --- Schema discovery for admin tooling ---
